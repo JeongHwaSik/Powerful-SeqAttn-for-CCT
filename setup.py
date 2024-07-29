@@ -17,7 +17,7 @@ def init_distributed_mode(args):
     os.environ["INITIALIZED"] = 'TRUE'
     os.environ["CUDA_DEVICE_ORDER"] = "PCI_BUS_ID"
     # fixme : GPU device 설정???
-    os.environ["CUDA_VISIBLE_DEVICES"] = "1"
+    os.environ["CUDA_VISIBLE_DEVICES"] = "0"
 
     if 'RANK' in os.environ and 'WORLD_SIZE' in os.environ:
         args.distributed = True

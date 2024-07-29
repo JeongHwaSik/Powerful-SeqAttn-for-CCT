@@ -17,12 +17,12 @@ from torch.utils.data import DataLoader
 from torch.nn.parallel import DistributedDataParallel as DDP
 from torchvision.datasets import CIFAR100, CIFAR10
 from torchvision.transforms import v2
-from resnet_for_cifar import resnet34, resnet50
-from seresnet_for_cifar import seresnet34, seresnet50
-from pyrmdnet_for_cifar import pyramidnet110_48, se_pyramidnet110_48, pyramidnet164_270, se_pyramidnet164_270
-from gate_resnet_for_cifar import gate_resnet34
-from gate_seresnet_for_cifar import gate_seresnet34
-from experiment_model import fusion_resnet34
+from models.resnet_for_cifar import resnet34, resnet50
+from models.seresnet_for_cifar import seresnet34, seresnet50
+from models.pyrmdnet_for_cifar import pyramidnet110_48, se_pyramidnet110_48, pyramidnet164_270, se_pyramidnet164_270
+from models.gate_resnet_for_cifar import gate_resnet34
+from models.gate_seresnet_for_cifar import gate_seresnet34
+from models.experiment_model import fusion_resnet34
 
 
 parser = argparse.ArgumentParser(description='Some Hyper-parameters to Train Deep Learning Model')
