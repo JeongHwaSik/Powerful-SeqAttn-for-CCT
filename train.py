@@ -1,413 +1,251 @@
-
-# CUDA_VISIBLE_DEVICES=6,7 torchrun --nproc_per_node=2 --standalone train.py resnet34 --use_wandb --cutmix
-
-import os
-import shutil
-import argparse
 import torch
 import time
-import wandb
-import torch.nn as nn
-import torch.optim as optim
-from setup import init_wandb, init_distributed_mode
-from utils import Metric, count_params
-from torch.utils.data.distributed import DistributedSampler
-from torchvision import transforms
-from torch.utils.data import DataLoader
-from torch.nn.parallel import DistributedDataParallel as DDP
-from torchvision.datasets import CIFAR100, CIFAR10
-from torchvision.transforms import v2
-from models.resnet_for_cifar import resnet34, resnet50
-from models.seresnet_for_cifar import seresnet34, seresnet50
-from models.pyrmdnet_for_cifar import pyramidnet110_48, se_pyramidnet110_48, pyramidnet164_270, se_pyramidnet164_270
-from models.gate_resnet_for_cifar import gate_resnet34
-from models.gate_seresnet_for_cifar import gate_seresnet34
-from models.experiment_model import fusion_resnet34
+import datetime
+from args import get_args_parser
+from setup import setup
+from timm import create_model
+from log import Result
+from metric import Metric, reduce_mean, accuracy
+from dataset import get_dataset, get_dataloader
+from optimizer import get_optimizer_and_scheduler, get_criterion_and_scaler
+from utils import get_ema_ddp_model, print_metadata, save_checkpoint, get_learning_rate
 
 
-parser = argparse.ArgumentParser(description='Some Hyper-parameters to Train Deep Learning Model')
 
-parser.add_argument('--proj', type=str, default='ResNet Experiments', help='Project Name')
-parser.add_argument('--expname', type=str, default='test', help='Experiment name')
-parser.add_argument('model', type=str, help='Model Options: (resnet, pyramidnet)')
-parser.add_argument('--dataset', dest='dataset', type=str, default='cifar100', help='Dataset Options: (cifar10, cifar100)')
-parser.add_argument('--bs', dest='batch_size',  metavar='', type=int, default=128, help='Batch Size')
-parser.add_argument('--optimizer', dest='optimizer', metavar='', type=str, default='SGD', help='Optimizer')
-parser.add_argument('--lossfn', dest='loss_func', metavar='', type=str, default='CrossEntropy', help='Loss Function')
-parser.add_argument('--lr', '--learning_rate', metavar='', type=float, default=0.1, help='Learning Rate')
-parser.add_argument('--momentum', dest='momentum', metavar='', type=float, default=0.9, help='Momentum')
-parser.add_argument('--wd', '--weight_decay', metavar='', type=float, default=1e-4, help='Weight Decay')
-parser.add_argument('--epochs', dest='epochs',  metavar='', type=int, default=100, help='Number of Epochs')
-parser.add_argument('--cutmix', dest='cutmix', action='store_true', default=False, help='Use CutMix or MixUp')
-parser.add_argument('--print_frequency', dest='print_frequency', metavar='', type=int, default=50, help='Print Frequency')
-parser.add_argument('--verbose', dest='verbose', action='store_true', default=True, help='Verbose')
-parser.add_argument('--use_wandb', dest='wandb', action='store_true', help='Use Wandb')
+def run(args):
 
-parser.add_argument('--cuda', dest='cuda', type=str, default='', help='GPU Device ID')
+    # init DDP & logger
+    setup(args)
 
+    # load dataset & dataloader
+    train_dataset, val_dataset = get_dataset(args)
+    train_dataloader, val_dataloader = get_dataloader(train_dataset, val_dataset, args)
 
-best_acc1 = 0
-best_acc5 = 0
+    # create model # fixme: change custom-resnet into timm
+    model = create_model(model_name=args.model_name, num_classes=args.num_classes)
+    model, ema_model, ddp_model = get_ema_ddp_model(model, args)
 
-def main():
+    # load optimizer & scheduler
+    optimizer, scheduler = get_optimizer_and_scheduler(model, args)
 
-    global args, best_acc1, best_acc5
+    # load criterion(loss func) & scaler
+    criterion, valid_criterion, scaler = get_criterion_and_scaler(args)
 
-    args = parser.parse_args()
+    # print metadata b/f training
+    print_metadata(model, train_dataset, val_dataset, args)
 
-    # Initial Setup
-    init_distributed_mode(args)
-    init_wandb(args)
-
-    # Data Preprocessing for CIFAR dataset
-    normalize = transforms.Normalize(mean=[x/255.0 for x in [125.3, 123.0, 113.9]],
-                                    std=[x/255.0 for x in [63.0, 62.1, 66.7]])
-
-    transform_train = transforms.Compose([
-        transforms.RandomCrop(32, padding=4),
-        transforms.RandomHorizontalFlip(),
-        transforms.ToTensor(),
-        normalize
-    ])
-
-    transform_test = transforms.Compose([
-        transforms.ToTensor(),
-        normalize
-    ])
-
-    if args.dataset == 'cifar10':
-        dset_train = CIFAR10(root="./data", download=True, train=True, transform=transform_train)
-        dset_val = CIFAR10(root="./data", download=True, train=False, transform=transform_train)
-
-        train_loader = DataLoader(dset_train, batch_size=args.batch_size, shuffle=True, num_workers=2)
-        val_loader = DataLoader(dset_val, batch_size=args.batch_size, shuffle=True, num_workers=2)
-
-        num_classes = 10
-
-    elif args.dataset == 'cifar100':
-
-        dset_train = CIFAR100(root="./data", download=True, train=True, transform=transform_train)
-        dset_val = CIFAR100(root="./data", download=True, train=False, transform=transform_train)
-
-        if args.distributed:
-
-            train_sampler = DistributedSampler(dataset=dset_train, shuffle=True)
-            val_sampler = DistributedSampler(dataset=dset_val, shuffle=False)
-
-            train_loader = DataLoader(
-                dset_train,
-                batch_size=int(args.batch_size / args.world_size),
-                shuffle=False,
-                num_workers=4,
-                sampler=train_sampler,
-                pin_memory=True
-            )
-            val_loader = DataLoader(
-                dset_val,
-                batch_size=int(args.batch_size / args.world_size),
-                shuffle=False,
-                num_workers=4,
-                sampler=val_sampler,
-                pin_memory=True
-            )
-        else:
-            train_loader = DataLoader(dset_train, batch_size=args.batch_size, shuffle=True, num_workers=2)
-            val_loader = DataLoader(dset_val, batch_size=args.batch_size, shuffle=True, num_workers=2)
-
-        num_classes = 100
-
+    # control logic
+    if args.resume:
+        pass
+        # start_epoch = resume_from_checkpoint() # fixme: implement resmue_from_checkpoint func,
     else:
-        raise Exception(f'Unknown Dataset: {args.dataset}')
+        start_epoch = 0
 
-    # Model configuration (ResNet, SEResNet, PyramidNet)
-    if args.model == 'resnet34':
-        model = resnet34(num_classes=num_classes)
-    elif args.model == 'seresnet34':
-        model = seresnet34(num_classes=num_classes)
-    elif args.model == 'resnet50':
-        model = resnet50(num_classes=num_classes)
-    elif args.model == 'seresnet50':
-        model = seresnet50(num_classes=num_classes)
-    elif args.model == 'pyramidnet110_48':
-        model = pyramidnet110_48(num_classes=num_classes)
-    elif args.model == 'se_pyramidnet110_48':
-        model = se_pyramidnet110_48(num_classes=num_classes)
-    elif args.model == 'pyramidnet164_270':
-        model = pyramidnet164_270(num_classes=num_classes)
-    elif args.model == 'se_pyramidnet164_270':
-        model = se_pyramidnet164_270(num_classes=num_classes)
-    elif args.model == 'gate_resnet34':
-        model = gate_resnet34(num_classes=num_classes)
-    elif args.model == 'gate_seresnet34':
-        model = gate_seresnet34(num_classes=num_classes)
-    elif args.model == 'fusion_resnet34':
-        model = fusion_resnet34(num_classes=num_classes)
-    else:
-        raise Exception(f'Unknown Model Name: {args.model}')
+    start_epoch = args.start_epoch if args.start_epoch else start_epoch
+    end_epoch = args.end_epoch if args.end_epoch else args.epochs
 
-    model = model.to(args.gpu)
+    if scheduler is not None and start_epoch:
+        # fixme: sequential lr does not support step with epoch as positional variable
+        scheduler.step(start_epoch)
 
-    if args.distributed:
-        # To get same calculation results as single GPU, should synchronize b/t GPUs when doing BatchNorm
-        model = nn.SyncBatchNorm.convert_sync_batchnorm(model)
-        # Warped by DDP (Distributed Data Parallel)
-        model = DDP(module=model, device_ids=[args.gpu])
+    if args.validate_only:
+        validation(model, val_dataloader, valid_criterion, args, 'org')
+        if args.ema:
+            validation(ema_model.module, val_dataloader, valid_criterion, args, 'ema')
+        return
 
-    # Loss function (default: CrossEntropyLoss)
-    loss_func = nn.CrossEntropyLoss()
+    # train
+    best_epoch = 0
+    best_acc = 0
+    top1_list = []
+    top5_list = []
+    start_time = time.time()
 
-    # Optimizer (default: SGD)
-    optimizer = optim.SGD(model.parameters(), lr=args.lr, momentum=args.momentum, weight_decay=args.wd, nesterov=True)
-
-    # Learning Rate Scheduler (default: cosine)
-    # lr_scheduler = optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=args.epochs, eta_min=1e-5)
-
-    # Model info.
-    params = count_params(model)
-    print(f"Training Started (Model: {args.model}, # of Parameters: {params})")
-    print(model)
-
-    for epoch in range(args.epochs):
-
+    for epoch in range(start_epoch, end_epoch):
         if args.distributed:
-            train_sampler.set_epoch(epoch)
+            train_dataloader.sampler.set_epoch(epoch)
 
-        learning_rate_scheduler(optimizer, epoch)
+        train_loss = train_one_epoch(ddp_model if args.distributed else model, train_dataloader, optimizer, criterion, args, ema_model, scheduler, scaler, epoch)
+        val_loss, top1, top5 = validation(ddp_model if args.distributed else model, val_dataloader, valid_criterion, args, 'org')
 
-        # train for one epoch
-        train_top1_acc, train_top5_acc, train_loss = train(model, train_loader, optimizer, loss_func, epoch, args.cutmix)
+        if args.ema:
+            eval_ema_metric = validation(ema_model.module, val_dataloader, valid_criterion, args, 'ema')
 
-        # val for one epoch
-        val_top1_acc, val_top5_acc, val_loss = validation(model, val_loader, loss_func, epoch)
+        if args.use_wandb:
+            args.log({'train_loss': train_loss, 'val_loss': val_loss, 'top1': top1, 'top5': top5}, metric=True)
 
+        if best_acc < top1:
+            best_acc = top1
+            best_epoch = epoch
+        top1_list.append(top1)
+        top5_list.append(top5)
 
-        # fixme : try to plot errors per iter.
-        # 🐝 plot in wandb.ai (train loss per epoch)
-        if args.wandb and args.is_rank_zero:
-            wandb.log({'train_loss': train_loss,
-                       'top-1 train accuracy': train_top1_acc,
-                       'top-5 train accuracy': train_top5_acc,
-                       'top-1 val accuracy': val_top1_acc,
-                       'top-5 val accuracy': val_top5_acc
-                       })
+        if args.save_checkpoint and args.is_rank_zero:
+            save_checkpoint(args.log_dir, model, ema_model, optimizer, scaler, scheduler, epoch, is_best=(best_epoch==epoch))
 
-        is_best = (val_top1_acc >= best_acc1)
-        best_acc1 = max(val_top1_acc, best_acc1)
-        if is_best:
-            best_acc5 = val_top5_acc
-
-        print('\n')
-        print(f'*** Current Best (val) Accuracy (top-1 acc: {val_top1_acc:.4f}, top-5 acc: {val_top5_acc:.4f}) ***')
-        print('\n')
-
-        save_checkpoint({
-            'experiment': args.expname,
-            'epoch': epoch,
-            'state_dict': model.state_dict(),
-            'best_acc1': best_acc1,
-            'best_acc5': best_acc5,
-            'optimizer': optimizer.state_dict()
-        }, is_best)
-
-    print(f'Best (val) Accuracy (top-1 acc: {best_acc1}, top-5 acc: {best_acc5})')
-
-    # 🐝 finish wandb.ai
-    if args.wandb and args.is_rank_zero:
-        wandb.finish(quiet=True)
+    # final summary
+    if args.is_rank_zero:
+        best_acc = round(float(best_acc), 4)
+        top1 = round(float(sum(top1_list[-3:]) / 3), 4)
+        top5 = round(float(sum(top5_list[-3:]) / 3), 4)
+        duration = str(datetime.timedelta(seconds=int(time.time() - start_time))).split('.')[0]
+        Result(args.output_dir).save_result(args, top1_list, top5_list,\
+                                            dict(duration=duration, best_acc=best_acc, avg_top1_acc=top1, avg_top5_acc=top5))
 
 
-def save_checkpoint(state, is_best, filename='checkpoint.pth.tar'):
-    directory = f"{args.proj}_checkpoint/{args.expname}/"
-    if not os.path.exists(directory):
-        os.makedirs(directory)
-    filename = directory + filename
-    torch.save(state, filename)
 
-    # copy best state file
-    if is_best:
-        shutil.copyfile(filename, f'{args.proj}_checkpoint/{args.expname}/' + 'model_best.pth.tar')
-
-
-def train(
-        model,
-        train_dataloader: torch.utils.data.DataLoader,
-        optimizer: torch.optim.Optimizer,
-        # lr_scheduler: torch.optim.lr_scheduler,
-        loss_func: torch.nn,
-        epoch: int,
-        do_mixup_or_cutmix: bool=False,
+@torch.inference_mode()
+def validation(
+    model,
+    valid_dataloader,
+    criterion,
+    args,
+    mode='org' # original or ema
 ):
-    losses = Metric(reduce=True)
-    top1_accs = Metric(reduce=True)
-    top5_accs = Metric(reduce=True)
-    batch_time = Metric()
-    data_time = Metric()
+    # create metric
+    data_m = Metric(reduce_every_n_step=0, reduce_on_compute=False, header='Data:')
+    batch_m = Metric(reduce_every_n_step=0, reduce_on_compute=False, header='Batch:')
+    top1_m = Metric(reduce_every_n_step=args.print_freq, reduce_on_compute=True, header='Top-1:')
+    top5_m = Metric(reduce_every_n_step=args.print_freq, reduce_on_compute=True, header='Top-5:')
+    loss_m = Metric(reduce_every_n_step=args.print_freq, reduce_on_compute=True, header='Loss:')
 
-    # Data Augmentation: CutMix or MixUp
-    if do_mixup_or_cutmix is True:
-        cutmix = v2.CutMix(num_classes=100)
-        mixup = v2.MixUp(num_classes=100)
-        cutmix_or_mixup = v2.RandomChoice([cutmix, mixup])
-
-
-    end = time.time()
-    current_lr = get_learning_rate(optimizer)[0]
-
-    # switch model to training mode
-    model.train()
-    for idx, it in enumerate(train_dataloader):
-        # measure data loading time
-        data_time.update(time.time() - end)
-
-        x_batch, y_batch = it
-
-        # Models and Data should be in the same device
-        # memory format: (B, C, H, W) -> (B, H, W, C)
-        # still same shape but different stride: (C*H*W, H*W, W, 1) -> (C*H*W, 1, W*C, C)
-        model = model.to(device=args.device, memory_format=torch.channels_last)
-        x_batch = x_batch.to(device=args.device, memory_format=torch.channels_last)
-        y_batch = y_batch.to(device=args.device)
-
-        if do_mixup_or_cutmix is True:
-            # CutMix or MixUp input batches
-            x_batch, y_batch = cutmix_or_mixup(x_batch, y_batch)
-
-            target_a_idx = y_batch.topk(k=2, dim=-1).indices[:, 0]
-            target_b_idx = y_batch.topk(k=2, dim=-1).indices[:, 1]
-            lam = y_batch.topk(k=2, dim=-1).values[:, 0][0]
-
-            # Forwarding and compute loss
-            output = model(x_batch)
-            loss = loss_func(output, target_a_idx) * lam + loss_func(output, target_b_idx) * (1 - lam)
-
-            y_batch = target_a_idx
-
-        else:
-            # Forwarding and compute loss
-            output = model(x_batch)
-            loss = loss_func(output, y_batch)
-
-        top1_acc, top5_acc = accuracy(output, y_batch, topk=(1,5))
-
-        losses.update(loss, x_batch.size(0))
-        top1_accs.update(top1_acc, x_batch.size(0))
-        top5_accs.update(top5_acc, x_batch.size(0))
-
-        # fixme : add AMP to speed up!
-        # This will zero out the gradients for this minibatch.
-        optimizer.zero_grad()
-
-        loss.backward() # Backpropagation
-        optimizer.step() # Perform parameter updates
-        # lr_scheduler.step() # Learning Rate updates
-
-        batch_time.update(time.time() - end)
-        end = time.time()
-
-        if idx % args.print_frequency == 0 and args.verbose is True:
-            print(
-                f'Epoch: [{epoch}/{args.epochs}][{idx}/{len(train_dataloader)}]\t\
-                LR: {current_lr:.6f}\t\
-                Time {batch_time.value:.3f} ({batch_time.avg:.3f})\t\
-                Data {data_time.value:.3f} ({data_time.avg:.3f})\t\
-                Loss {losses.value.item():.4f} ({losses.avg.item():.4f})\t\
-                Top-1 acc {top1_accs.value.item():.4f} ({top1_accs.avg.item():.4f})\t\
-                Top-5 acc {top5_accs.value.item():.4f} ({top5_accs.avg.item():.4f})\t'
-            )
-
-    return top1_accs.avg.item(), top5_accs.avg.item(), losses.avg.item()
-
-
-
-def validation(model, val_dataloader, loss_func, epoch):
-
-    losses = Metric(reduce=True)
-    top1_accs = Metric(reduce=True)
-    top5_accs = Metric(reduce=True)
-    batch_time = Metric()
-
-    # switch model to evaluate mode
+    # model to validation mode
     model.eval()
+    start_time = time.time()
 
-    end = time.time()
-    print('\n')
-    for idx, it in enumerate(val_dataloader):
+    for batch_idx, (x, y) in enumerate(valid_dataloader):
+        batch_size = x.size(0)
+        x = x.to(args.device)
+        y = y.to(args.device)
 
-        x_batch, y_batch = it
-        # memory format: (B, C, H, W) -> (B, H, W, C)
-        model = model.to(device=args.device, memory_format=torch.channels_last)
-        x_batch = x_batch.to(device=args.device, memory_format=torch.channels_last)
-        y_batch = y_batch.to(device=args.device)
+        if args.channels_last:
+            x = x.to(memory_format=args.channels_last)
 
-        output = model(x_batch)
-        loss = loss_func(output, y_batch)
+        data_m.update(time.time() - start_time)
 
-        top1_acc, top5_acc = accuracy(output, y_batch, topk=(1,5))
+        with torch.cuda.amp.autocast(args.amp):
+            output = model(x)
+            loss = criterion(output, y)
 
-        losses.update(loss, x_batch.size(0))
-        top1_accs.update(top1_acc, x_batch.size(0))
-        top5_accs.update(top5_acc, x_batch.size(0))
+        top1, top5 = accuracy(output, y, topk=(1,5,))
 
-        batch_time.update(time.time() - end)
-        end = time.time()
+        top1_m.update(top1, batch_size)
+        top5_m.update(top5, batch_size)
+        loss_m.update(loss, batch_size)
 
-        if idx % args.print_frequency == 0 and args.verbose == True:
-            print(f'Test (on val set): [{epoch}/{args.epochs}][{idx}/{len(val_dataloader)}]\t\
-                  Time {batch_time.value:.3f} ({batch_time.avg:.3f})\t\
-                  Top-1 acc {top1_accs.value.item():.4f} ({top1_accs.avg.item():.4f})\t\
-                  Top-5 acc {top5_accs.value.item():.4f} ({top5_accs.avg.item():.4f})\t'
-            )
+        if batch_idx and args.print_freq and batch_idx % args.print_freq == 0:
+            num_digits = len(str(args.iter_per_epoch))
+            args.log(f"VALID({mode}): [{batch_idx:>{num_digits}}/{args.iter_per_epoch}] {batch_m} {data_m} {loss_m} {top1_m} {top5_m}")
 
+        batch_m.update(time.time() - start_time)
+        start_time = time.time()
 
-    return top1_accs.avg.item(), top5_accs.avg.item(), losses.avg.item()
+    # calculate metric
+    duration = str(datetime.timedelta(seconds=batch_m.sum)).split('.')[0]
+    data = str(datetime.timedelta(seconds=data_m.sum)).split('.')[0]
+    f_b_o = str(datetime.timedelta(seconds=batch_m.sum - data_m.sum)).split('.')[0]
 
+    # average out acc. & loss in all GPUs for validation
+    top1 = top1_m.compute()
+    top5 = top5_m.compute()
+    loss = loss_m.compute()
 
+    # print metric
+    space = 16
+    num_metric = 6
+    args.log('-' * space * num_metric)
+    args.log(("{:>16}" * num_metric).format('Stage', 'Batch', 'Data', 'F+B+O', 'Top-1 Acc', 'Top-5 Acc'))
+    args.log('-' * space * num_metric)
+    args.log(f"{'VALID(' + mode + ')':>{space}}{duration:>{space}}{data:>{space}}{f_b_o:>{space}}{top1:{space}.4f}{top5:{space}.4f}")
+    args.log('-' * space * num_metric)
 
-def learning_rate_scheduler(optimizer, epoch):
-    """
-    Decaying the learning rate for CIFAR dataset
-    """
-    new_lr = args.lr * (0.1 ** (epoch // (args.epochs * 0.5))) * (0.1 ** (epoch // (args.epochs * 0.75)))
-
-    for param_group in optimizer.param_groups:
-        param_group['lr'] = new_lr
-
-
-def get_learning_rate(optimizer):
-    """
-    Return learning rate history
-    """
-    lr = []
-    for param_group in optimizer.param_groups:
-        lr += [param_group['lr']]
-    return lr
+    return loss, top1, top5
 
 
-def accuracy(output, target, topk=(1,)):
-    """
-    Computes the precision@k for the specified values of k
-    """
-    maxk = max(topk)
-    batch_size = output.size(0)
+def train_one_epoch(
+        model,
+        train_dataloader,
+        optimizer,
+        criterion,
+        args,
+        ema_model=None,
+        scheduler=None,
+        scaler=None,
+        epoch=None
+):
+    # create metric
+    data_m = Metric(reduce_every_n_step=0, reduce_on_compute=False, header='Data:')
+    batch_m = Metric(reduce_every_n_step=0, reduce_on_compute=False, header='Batch:')
+    loss_m = Metric(reduce_every_n_step=0, reduce_on_compute=False, header='Loss:') # loss of only local rank 0 GPU
 
-    _, pred = output.topk(k=maxk, dim=1, largest=True, sorted=True) # if top-5: (B, 5)
-    # transpose to (5, B) for easily indexing
-    # .contiguous() makes a new transposed tensor(= new stride) without referring to the original tensor
-    # so use .contiguous() after .permute() or .transpose()
-    pred = pred.t().contiguous()
-    correct = pred.eq(target.reshape(1, -1).contiguous().expand_as(pred)) # (5, B)
+    # model to train mode
+    model.train()
+    start_time = time.time()
 
-    acc = []
-    for k in topk:
-        correct_k = correct[:k].reshape(-1).contiguous().float().sum(dim=0, keepdim=True)
-        acc.append(correct_k.mul_(100.0 / batch_size))
+    for batch_idx, (x, y) in enumerate(train_dataloader):
 
-    return acc
+        batch_size = x.size(0)
+        x = x.to(args.device)
+        y = y.to(args.device)
+
+        if args.channels_last:
+            x = x.to(memory_format=args.channels_last)
+
+        data_m.update(time.time() - start_time)
+
+        with torch.cuda.amp.autocast(args.amp):
+            output = model(x)
+            loss = criterion(output, y)
+
+        if args.distributed:
+            loss = reduce_mean(loss, args.world_size)
+
+        if args.amp:
+            scaler(loss, optimizer, model.parameters(), scheduler, args.grad_norm, batch_idx % args.grad_accum == 0)
+        else:
+            loss = loss / args.grad_accum # normalize loss to account for batch accumulation
+            loss.backward()
+            if args.grad_norm:
+                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_norm)
+            if batch_idx % args.grad_accum == 0:
+                optimizer.step()
+                optimizer.zero_grad()
+
+        loss_m.update(loss, batch_size)
+
+        if batch_idx and args.print_freq and batch_idx % args.print_freq == 0:
+            num_digits = len(str(args.iter_per_epoch))
+            args.log(f"TRAIN({epoch:03}): [{batch_idx:>{num_digits}}/{args.iter_per_epoch}] {batch_m} {data_m} {loss_m}") # TODO: add learning rate
+
+        if batch_idx and ema_model and batch_idx % args.ema_update_step == 0:
+            ema_model.update(model)
+
+        batch_m.update(time.time() - start_time)
+        start_time = time.time()
+
+    # only seconds, not milli-sec or so
+    duration = str(datetime.timedelta(seconds=batch_m.sum)).split('.')[0]
+    data = str(datetime.timedelta(seconds=data_m.sum)).split('.')[0]
+    f_b_o = str(datetime.timedelta(seconds=(batch_m.sum-data_m.sum))).split('.')[0]
+    loss = loss_m.compute() # average loss of local rank 0 GPU
+
+    # print metric
+    space = 16
+    num_metric = 5
+    args.log('-' * space * num_metric)
+    args.log(("{:>16}" * num_metric).format('Stage', 'Batch', 'Data', 'F+B+O', 'Loss'))
+    args.log('-' * space * num_metric)
+    args.log(f"{'TRAIN(' + str(epoch) + ')':>{space}}{duration:>{space}}{data:>{space}}{f_b_o:>{space}}{loss:{space}.4f}")
+    args.log('-' * space * num_metric)
+
+    return loss
 
 
 
 if __name__ == '__main__':
-    main()
+    arg_parser = get_args_parser()
+    args = arg_parser.parse_args()
+    run(args)
 
 
 

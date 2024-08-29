@@ -164,58 +164,25 @@ class ResNet(nn.Module):
 
 
 
+model_config = {
+    # ResNet
+    'resnet18' : {'parameter':dict(num_blocks=[2, 2, 2, 2], bottleneck=False), 'etc':{}},
+    'resnet34': {'parameter':dict(num_blocks=[3, 4, 6, 3], bottleneck=False), 'etc':{}},
+    'resnet50': {'parameter':dict(num_blocks=[3, 4, 6, 3], bottleneck=True), 'etc':{}},
+    'resnet101': {'parameter': dict(num_blocks=[3, 4, 23, 3], bottleneck=True), 'etc': {}},
+    'resnet152': {'parameter': dict(num_blocks=[3, 8, 36, 3], bottleneck=True), 'etc': {}},
 
-def resnet18_for_imagenet():
-    return ResNet(
-                num_blocks = [2, 2, 2, 2],
-                channels = [64, 128, 256, 512],
-                strides = [1 ,2, 2, 2],
-                in_channel = 3,
-                num_classes = 1000,
-                bottleneck = False
-    )
+    # SE-ResNet
+    'seresnet18' : {'parameter':dict(num_blocks=[2, 2, 2, 2], bottleneck=False, se=True), 'etc':{}},
+    'seresnet34': {'parameter': dict(num_blocks=[3, 4, 6, 3], bottleneck=False, se=True), 'etc': {}},
+    'seresnet50': {'parameter': dict(num_blocks=[3, 4, 6, 3], bottleneck=True, se=True), 'etc': {}},
+    'seresnet101': {'parameter': dict(num_blocks=[3, 4, 23, 3], bottleneck=True, se=True), 'etc': {}},
+    'seresnet152': {'parameter': dict(num_blocks=[3, 8, 36, 3], bottleneck=True, se=True), 'etc': {}},
+}
 
-def resnet34_for_imagenet():
-    return ResNet(
-                num_blocks = [3, 4, 6, 3],
-                channels = [64, 128, 256, 512],
-                strides = [1 ,2, 2, 2],
-                in_channel = 3,
-                num_classes = 1000,
-                bottleneck = False
-    )
-
-
-def resnet50_for_imagenet():
-    return ResNet(
-                num_blocks = [3, 4, 6, 3],
-                channels = [64, 128, 256, 512],
-                strides = [1 ,2, 2, 2],
-                in_channel = 3,
-                num_classes = 1000,
-                bottleneck = True
-    )
-
-def resnet101_for_imagenet():
-    return ResNet(
-                num_blocks = [3, 4, 23, 3],
-                channels = [64, 128, 256, 512],
-                strides = [1 ,2, 2, 2],
-                in_channel = 3,
-                num_classes = 1000,
-                bottleneck = True
-    )
-
-def resnet152_for_imagenet():
-    return ResNet(
-                num_blocks = [3, 8, 36, 3],
-                channels = [64, 128, 256, 512],
-                strides = [1 ,2, 2, 2],
-                in_channel = 3,
-                num_classes = 1000,
-                bottleneck = True
-    )
-
+def create_resnet_for_imagenet(model_name, num_classes=1000):
+    config = model_config[model_name]['parameter']
+    return ResNet(num_classes=num_classes, **config)
 
 
 

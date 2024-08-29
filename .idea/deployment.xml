@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="PublishConfigData" autoUpload="Always" serverName="server" remoteFilesAllowedToDisappearOnAutoupload="false">
+    <serverData>
+      <paths name="docker1">
+        <serverdata>
+          <mappings>
+            <mapping deploy="./private/DL-Classification" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="docker1_interpreter">
+        <serverdata>
+          <mappings>
+            <mapping deploy="./private/DL-Classification" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="docker2">
+        <serverdata>
+          <mappings>
+            <mapping deploy="./private/DL-Classification" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="docker2_interpreter">
+        <serverdata>
+          <mappings>
+            <mapping deploy="./private/DL-Classification" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="docker3">
+        <serverdata>
+          <mappings>
+            <mapping deploy="./private/DL-Classification" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="docker3_interpreter">
+        <serverdata>
+          <mappings>
+            <mapping deploy="./private/DL-Classification" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="docker4">
+        <serverdata>
+          <mappings>
+            <mapping deploy="./private/DL-Classification" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="docker4_interpreter">
+        <serverdata>
+          <mappings>
+            <mapping deploy="./private/DL-Classification" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="docker5">
+        <serverdata>
+          <mappings>
+            <mapping deploy="./private/DL-Classification" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="docker5_interpreter">
+        <serverdata>
+          <mappings>
+            <mapping deploy="./private/DL-Classification" local="$PROJECT_DIR$" web="/" />
+          </mappings>
+        </serverdata>
+      </paths>
+    </serverData>
+    <option name="myAutoUpload" value="ALWAYS" />
+  </component>
+</project>

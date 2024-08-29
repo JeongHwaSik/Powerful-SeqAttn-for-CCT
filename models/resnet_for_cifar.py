@@ -1,7 +1,5 @@
 import torch.nn as nn
 
-
-
 class SEBlock(nn.Module):
     """
     Squeeze and Excitation Block
@@ -111,7 +109,7 @@ class ResNet(nn.Module):
     """
 
     def __init__(self,
-                 num_blocks: list = [3, 4, 6, 3],
+                 num_blocks: list,
                  channels: list = [64, 128, 256, 512],
                  strides: list = [1 ,2, 2, 2],
                  in_channel = 3,
@@ -197,47 +195,22 @@ class ResNet(nn.Module):
         return self.classifier(x)
 
 
-def resnet34(num_classes=100):
-    return ResNet(
-                num_blocks = [3, 4, 6, 3],
-                channels = [64, 128, 256, 512],
-                strides = [1 ,2, 2, 2],
-                in_channel = 3,
-                num_classes = num_classes,
-                bottleneck = False,
-                se = False
-    )
+model_config = {
+    # ResNet
+    'resnet18' : {'parameter':dict(num_blocks=[2, 2, 2, 2], bottleneck=False), 'etc':{}},
+    'resnet34': {'parameter':dict(num_blocks=[3, 4, 6, 3], bottleneck=False), 'etc':{}},
+    'resnet50': {'parameter':dict(num_blocks=[3, 4, 6, 3], bottleneck=True), 'etc':{}},
+    'resnet101': {'parameter': dict(num_blocks=[3, 4, 23, 3], bottleneck=True), 'etc': {}},
+    'resnet152': {'parameter': dict(num_blocks=[3, 8, 36, 3], bottleneck=True), 'etc': {}},
 
-def resnet50(num_classes=100):
-    return ResNet(
-                num_blocks = [3, 4, 6, 3],
-                channels = [64, 128, 256, 512],
-                strides = [1 ,2, 2, 2],
-                in_channel = 3,
-                num_classes = num_classes,
-                bottleneck = True,
-                se = False
-    )
+    # SE-ResNet
+    'seresnet18' : {'parameter':dict(num_blocks=[2, 2, 2, 2], bottleneck=False, se=True), 'etc':{}},
+    'seresnet34': {'parameter': dict(num_blocks=[3, 4, 6, 3], bottleneck=False, se=True), 'etc': {}},
+    'seresnet50': {'parameter': dict(num_blocks=[3, 4, 6, 3], bottleneck=True, se=True), 'etc': {}},
+    'seresnet101': {'parameter': dict(num_blocks=[3, 4, 23, 3], bottleneck=True, se=True), 'etc': {}},
+    'seresnet152': {'parameter': dict(num_blocks=[3, 8, 36, 3], bottleneck=True, se=True), 'etc': {}},
+}
 
-def seresnet34(num_classes=100):
-    return ResNet(
-                num_blocks = [3, 4, 6, 3],
-                channels = [64, 128, 256, 512],
-                strides = [1 ,2, 2, 2],
-                in_channel = 3,
-                num_classes = num_classes,
-                bottleneck = False,
-                se = True
-    )
-
-def seresnet50(num_classes=100):
-    return ResNet(
-                num_blocks = [3, 4, 6, 3],
-                channels = [64, 128, 256, 512],
-                strides = [1 ,2, 2, 2],
-                in_channel = 3,
-                num_classes = num_classes,
-                bottleneck = True,
-                se = True
-    )
-
+def create_resnet_for_cifar(model_name, num_classes):
+    config = model_config[model_name]['parameter']
+    return ResNet(num_classes=num_classes, **config)
