@@ -1,3 +1,4 @@
+import inspect
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -35,18 +36,20 @@ class NativeScalerWithGradAccum:
     def __init__(self):
         """
         NativeScalerWithGradAccum (timm)
-        Native(pytorch) f16 scaler
+        Native(pytorch) float16 scaler
         """
         self._scaler = GradScaler()
 
     def __call__(self, loss, optimizer, model_param, scheduler=None, grad_norm=None, update=True):
-        self._scaler.scale(loss).backward()
+        self._scaler.scale(loss).backward() # backward with scaled loss
+        # print(self._scaler.scale(loss))
+
         if update:
             if grad_norm:
                 self._scaler.unscale_(optimizer) # unscaling gradients b/f gradient clipping
-                torch.nn.utils.clip_grad_norm_(model_param, grad_norm) # gradient clipping for stable update (threshold = grad_norm)
-            self._scaler.step(optimizer)
-            self._scaler.update()
+                torch.nn.utils.clip_grad_norm_(model_param, grad_norm) # gradient clipping for stable update (max threshold = grad_norm)
+            self._scaler.step(optimizer) # unscale gradients and update weights
+            self._scaler.update() # update scale factor
             optimizer.zero_grad()
             if scheduler:
                 scheduler.step()
@@ -60,17 +63,29 @@ class NativeScalerWithGradAccum:
 
 
 def get_optimizer_and_scheduler(model, args):
-    parameter = model.parameters()
+
+    # supports torch >= 2.0.0
+    if args.fused and ('fused' in inspect.signature(AdamW).parameters):
+        param_dict = {pn: p for pn, p in model.named_parameters() if p.requires_grad}
+        decay_param = [p for pn, p in param_dict.items() if p.dim() >= 2]
+        no_decay_param = [p for pn, p in param_dict.items() if p.dim() < 2]
+        parameter = [
+            {'params': decay_param, 'weight_decay': args.weight_decay},
+            {'params': no_decay_param, 'weight_decay': 0.0},
+        ]
+    else:
+        parameter = model.parameters()
+
     total_iter = args.epochs * args.iters_per_epoch
     warmup_iter = args.warmup_epochs * total_iter
 
     # optimizer
     if args.optimizer == 'sgd':
-        optimizer = SGD(params=parameter, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=args.nesterov)
+        optimizer = SGD(params=parameter, lr=args.lr, momentum=args.momentum, weight_decay=args.weight_decay, nesterov=args.nesterov, fused=args.fused)
     elif args.optimizer == 'adamw':
-        optimizer = AdamW(params=parameter, lr=args.lr, betas=args.betas, eps=args.eps, weight_decay=args.weight_decay)
+        optimizer = AdamW(params=parameter, lr=args.lr, betas=args.betas, eps=args.eps, weight_decay=args.weight_decay, fused=args.fused)
     elif args.optimizer == 'rmsprop':
-        optimizer = RMSprop(params=parameter, lr=args.lr, eps=args.eps, momentum=args.momentum, weight_decay=args.weight_decay)
+        optimizer = RMSprop(params=parameter, lr=args.lr, eps=args.eps, momentum=args.momentum, weight_decay=args.weight_decay, fused=args.fused)
     else:
         raise NotImplementedError(f"{args.optimizer} not implemented yet")
 

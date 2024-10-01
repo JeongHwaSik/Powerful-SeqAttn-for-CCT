@@ -1,5 +1,6 @@
 import torch
 import time
+import math
 import datetime
 from args import get_args_parser
 from setup import setup
@@ -8,7 +9,7 @@ from log import Result
 from metric import Metric, reduce_mean, accuracy
 from dataset import get_dataset, get_dataloader
 from optimizer import get_optimizer_and_scheduler, get_criterion_and_scaler
-from utils import get_ema_ddp_model, print_metadata, save_checkpoint, get_learning_rate
+from utils import get_ema_ddp_model, print_metadata, save_checkpoint, resume_from_checkpoint
 
 
 
@@ -34,19 +35,14 @@ def run(args):
     # print metadata b/f training
     print_metadata(model, train_dataset, val_dataset, args)
 
-    # control logic
+    # control logic (resume)
     if args.resume:
-        pass
-        # start_epoch = resume_from_checkpoint() # fixme: implement resmue_from_checkpoint func,
+        start_epoch = resume_from_checkpoint(args.checkpoint_path, model, ema_model, optimizer, scaler, scheduler)
     else:
         start_epoch = 0
 
     start_epoch = args.start_epoch if args.start_epoch else start_epoch
     end_epoch = args.end_epoch if args.end_epoch else args.epochs
-
-    if scheduler is not None and start_epoch:
-        # fixme: sequential lr does not support step with epoch as positional variable
-        scheduler.step(start_epoch)
 
     if args.validate_only:
         validation(model, val_dataloader, valid_criterion, args, 'org')
@@ -119,7 +115,7 @@ def validation(
         y = y.to(args.device)
 
         if args.channels_last:
-            x = x.to(memory_format=args.channels_last)
+            x = x.to(memory_format=torch.channels_last)
 
         data_m.update(time.time() - start_time)
 
@@ -134,8 +130,8 @@ def validation(
         loss_m.update(loss, batch_size)
 
         if batch_idx and args.print_freq and batch_idx % args.print_freq == 0:
-            num_digits = len(str(args.iter_per_epoch))
-            args.log(f"VALID({mode}): [{batch_idx:>{num_digits}}/{args.iter_per_epoch}] {batch_m} {data_m} {loss_m} {top1_m} {top5_m}")
+            num_digits = len(str(args.iters_per_epoch))
+            args.log(f"VALID({mode}): [{batch_idx:>{num_digits}}/{args.iters_per_epoch}] {batch_m} {data_m} {loss_m} {top1_m} {top5_m}")
 
         batch_m.update(time.time() - start_time)
         start_time = time.time()
@@ -182,40 +178,48 @@ def train_one_epoch(
     model.train()
     start_time = time.time()
 
+    # initialize loss_accum
+    loss_accum = 0.0
     for batch_idx, (x, y) in enumerate(train_dataloader):
+        update = ((batch_idx+1) % args.grad_accum_step == 0) or (batch_idx + 1) == len(train_dataloader)
 
         batch_size = x.size(0)
         x = x.to(args.device)
         y = y.to(args.device)
 
         if args.channels_last:
-            x = x.to(memory_format=args.channels_last)
+            x = x.to(memory_format=torch.channels_last)
 
         data_m.update(time.time() - start_time)
 
-        with torch.cuda.amp.autocast(args.amp):
+        with torch.cuda.amp.autocast(enabled=args.amp):
             output = model(x)
             loss = criterion(output, y)
+            loss = loss / args.grad_accum_step  # normalize loss to account for batch accumulation
+            loss_accum += loss.detach()
 
         if args.distributed:
             loss = reduce_mean(loss, args.world_size)
 
         if args.amp:
-            scaler(loss, optimizer, model.parameters(), scheduler, args.grad_norm, batch_idx % args.grad_accum == 0)
+            scaler(loss, optimizer, model.parameters(), scheduler, args.grad_norm, update)
         else:
-            loss = loss / args.grad_accum # normalize loss to account for batch accumulation
             loss.backward()
-            if args.grad_norm:
-                torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_norm)
-            if batch_idx % args.grad_accum == 0:
+
+            if update:
+                if args.grad_norm:
+                    torch.nn.utils.clip_grad_norm_(model.parameters(), args.grad_norm)
                 optimizer.step()
                 optimizer.zero_grad()
+                scheduler.step()
 
-        loss_m.update(loss, batch_size)
+        if update:
+            loss_m.update(loss_accum, batch_size)
+            loss_accum = 0.0
 
-        if batch_idx and args.print_freq and batch_idx % args.print_freq == 0:
-            num_digits = len(str(args.iter_per_epoch))
-            args.log(f"TRAIN({epoch:03}): [{batch_idx:>{num_digits}}/{args.iter_per_epoch}] {batch_m} {data_m} {loss_m}") # TODO: add learning rate
+        if update: # and batch_idx % args.print_freq == 0
+            num_digits = len(str(args.iters_per_epoch))
+            args.log(f"TRAIN({epoch:03}): [{(batch_idx+1)//args.grad_accum_step:>{num_digits}}/{args.iters_per_epoch}] {batch_m} {data_m} {loss_m}")  # TODO: add learning rate
 
         if batch_idx and ema_model and batch_idx % args.ema_update_step == 0:
             ema_model.update(model)

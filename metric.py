@@ -66,21 +66,8 @@ def accuracy(output, target, topk=(1,)):
     """
     Computes the top-k for the specified values of k
     """
-    maxk = max(topk)
-    batch_size = output.size(0)
-
-    _, pred = output.topk(k=maxk, dim=1, largest=True, sorted=True) # if top-5: (B, 5)
-    # transpose to (5, B) for easily indexing
-    # .contiguous() makes a new transposed tensor(= new stride) without referring to the original tensor
-    # so use .contiguous() after .permute() or .transpose()
-    pred = pred.t().contiguous()
-    correct = pred.eq(target.reshape(1, -1).contiguous().expand_as(pred)) # (5, B)
-
-    acc = []
-    for k in topk:
-        correct_k = correct[:k].reshape(-1).contiguous().float().sum(dim=0, keepdim=True)
-        acc.append(correct_k.mul_(100.0 / batch_size))
-
+    prediction = torch.argsort(output, dim=-1, descending=True)
+    acc = [(prediction[:, :min(k, output.size(1))] == target.unsqueeze(-1)).float().sum(dim=-1).mean() * 100 for k in topk]
     return acc
 
 

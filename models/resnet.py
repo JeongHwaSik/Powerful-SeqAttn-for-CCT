@@ -1,5 +1,5 @@
 from torch import nn
-
+from timm.models.registry import register_model
 
 class ConvNormAct(nn.Sequential):
     def __init__(self, in_ch, out_ch, kernel_size, norm_layer=nn.BatchNorm2d, stride=1, padding=0, groups=1, act=True):
@@ -192,4 +192,15 @@ model_config = {
 def create_resnet(model_name, num_classes):
     config = model_config[model_name]['parameter']
     return ResNet(num_classes=num_classes, **config)
+
+
+
+@register_model
+def resnet50(pretrained=False, nblock=[3, 4, 6, 3], block=BottleNeck, num_classes=100):
+    return ResNet(nblock=nblock, block=block, num_classes=num_classes)
+
+
+
+
+
 

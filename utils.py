@@ -107,7 +107,8 @@ def print_metadata(model, train_dataset, test_dataset, args):
         'test_size', 'test_resize_mode', 'center_crop_ptr',
         'interpolation', 'mean', 'std', 'hflip', 'auto_aug', 'cutmix', 'mixup', 'remode', 'aug_repeat',
         'model_name', 'ema', 'ema_decay', 'criterion', 'smoothing',
-        'lr', 'epoch', 'optimizer', 'momentum', 'weight_decay', 'scheduler', 'warmup_epoch', 'batch_size'
+        'lr', 'epochs', 'optimizer', 'momentum', 'weight_decay', 'scheduler', 'warmup_epochs', 'batch_size',
+        'grad_accum_step', 'total_batch_size'
     ]]
     print_tabular(title, table, args)
 
@@ -157,21 +158,38 @@ def load_state_dict_from_checkpoint(checkpoint, key_list):
 
 def resume_from_checkpoint(checkpoint_path, model=None, ema_model=None, optimizer=None, scaler=None, scheduler=None):
 
-    obj_key_list = [(model, ['state_dict', 'model']), (ema_model, ['state_dict_ema', 'model_ema', 'state_dict', 'model']),
-                    (optimizer, ['optimizer']), (scaler, ['scaler'])]
+    obj_key_list = [
+        (model, ['state_dict', 'model']),
+        (ema_model, ['state_dict_ema', 'model_ema', 'state_dict', 'model']),
+        (optimizer, ['optimizer']),
+        (scaler, ['scaler']),
+        (scheduler, ['scheduler'])
+    ]
 
     if os.path.isfile(checkpoint_path):
-        checkpoint = torch.load(f=checkpoint_path, map_location='cpu') # fixme: ???
+        checkpoint = torch.load(checkpoint_path, map_location='cpu')
 
         for obj, key_list in filter(lambda x: x[0] is not None, obj_key_list):
             state_dict = load_state_dict_from_checkpoint(checkpoint, key_list)
+
+            if state_dict:
+                obj.load_state_dict(state_dict)
+            elif 'state_dict' in key_list:
+                obj.load_state_dict(checkpoint)
+            else:
+                raise ValueError(f'we can not find {key_list} in given checkpoint(dir={checkpoint_path})')
+
+        return checkpoint.get('epochs', None) + 1
+
+    else:
+        raise ValueError(f'no file exist in given checkpoint_path argument(dir={checkpoint_path}')
 
 
 def save_checkpoint(save_dir, model, ema_model, optimizer, scaler, scheduler, epoch, is_best=False):
     pairs = [('state_dict', model), ('state_dict_ema', ema_model),
              ('optimizer', optimizer), ('scaler', scaler), ('scheduler', scheduler)]
     checkpoint_dict = {k: v.state_dict() for k, v in pairs if v}
-    checkpoint_dict['epoch'] = epoch
+    checkpoint_dict['epochs'] = epoch
 
     torch.save(checkpoint_dict, os.path.join(save_dir, f'checkpoint_{epoch}.pth'))
     torch.save(checkpoint_dict, os.path.join(save_dir, f'checkpoint_last.pth'))

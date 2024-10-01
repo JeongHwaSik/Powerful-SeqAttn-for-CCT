@@ -1,4 +1,5 @@
 import torch.nn as nn
+from timm.models.registry import register_model
 
 class SEBlock(nn.Module):
     """

@@ -44,7 +44,8 @@ def log(msg, metric=False, logger=None):
 
 def init_logger(args):
     if args.resume:
-        args.exp_name = Path(args.checkpoint_path).resolve().parent.name # fixme: wrong...
+        args.exp_name = Path(args.checkpoint_path).resolve().parent.name
+        print(args.exp_name)
     else:
         if args.exp_name is None:
             args.exp_name = '_'.join(str(getattr(args, target)) for target in args.exp_target)
@@ -59,8 +60,9 @@ def init_logger(args):
     if args.is_rank_zero:
         Path(args.log_dir).mkdir(parents=True, exist_ok=True)
         args.logger = make_logger(args.text_log_path)
-        if args.use_wandb: # 🐝
-            wandb.init(project=args.project_name, name=args.exp_name, config=args, reinit=True, resume=args.resume)
+        # 🐝
+        if args.use_wandb:
+            wandb.init(project=args.project_name, name=args.exp_name, id=args.exp_name, config=args, reinit=True, resume="allow")
     else:
         args.logger = None
 
@@ -175,6 +177,8 @@ def setup(args):
         numpy.random.seed(args.seed)
         random.seed(args.seed)
         torch.manual_seed(args.seed)
+        if torch.cuda.is_available():
+            torch.cuda.manual_seed(args.seed)
         # dataloader - fixed seed
         args.seed_worker = seed_worker
     else:

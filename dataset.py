@@ -1,6 +1,7 @@
 import os
 import random
 import torch
+import math
 import numpy as np
 import torch.nn.functional as F
 from math import floor, sqrt
@@ -166,7 +167,7 @@ class CutMix:
 
 def get_dataset(args):
     dataset_name = _dataset_dict[args.dataset_name]
-    train_transform = TrainTransform(args.train_size, args.train_size_mode, args.random_crop_pad, args.random_crop_scale, args.random_crop_ratio,\
+    train_transform = TrainTransform(args.train_size, args.train_resize_mode, args.random_crop_pad, args.random_crop_scale, args.random_crop_ratio,\
                                      args.hflip, args.auto_aug, args.remode, args.interpolation, args.mean, args.std)
     val_transform = ValTransform(args.test_size, args.test_resize_mode, args.center_crop_ptr, args.interpolation, args.mean, args.std)
 
@@ -214,7 +215,12 @@ def get_dataloader(train_dataset, val_dataset, args):
                                   num_workers=args.num_workers, collate_fn=collate_fn, pin_memory=args.pin_memory, worker_init_fn=args.seed_worker)
     val_dataloader = DataLoader(dataset=val_dataset, batch_size=args.batch_size, shuffle=False, sampler=val_sampler,\
                                 num_workers=args.num_workers, collate_fn=None, pin_memory=args.pin_memory, worker_init_fn=args.seed_worker)
-    args.iter_per_epoch = len(train_dataloader)
+
+    # 'real_batch_size'
+    args.total_batch_size = args.batch_size * args.grad_accum_step
+
+    # iters_per_epoch: 'real_batch_size' iterations per epoch
+    args.iters_per_epoch = math.ceil(len(train_dataloader) / args.grad_accum_step)
 
     return train_dataloader, val_dataloader
 
