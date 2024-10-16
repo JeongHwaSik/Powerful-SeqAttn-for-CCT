@@ -1,6 +1,6 @@
-# Powerful SeqAttention for CCT
+# 🔥Powerful SeqAttention for CCT🔥
 
-For details see 🔥[Powerful SeqAttention for Compact Convolutional Transformer]()🔥 by Hwasik Jeong and Jongbin Ryu.
+For details see [Powerful SeqAttention for Compact Convolutional Transformer]() by Hwasik Jeong and Jongbin Ryu.
 
 <br>
 
@@ -27,7 +27,7 @@ This head architecture integrates sequence pooling with an attention mechanism, 
 SeqAttention head in CCT (SeqAttn1-CCT-7/3x1) not only surpasses both the original CCT and CCT with a single Gramian attention head, but also does so with fewer parameters compared to GA1-CCT-7/3x1. 
 The results below present the Top-1 and Top-5 accuracy on the CIFAR-100 and ImageNet datasets, along with the total number of parameters.
 <p>
-  <img width="1000", height="280" alt="Screenshot 2024-10-16 at 9 31 33 PM" src="https://github.com/user-attachments/assets/b3e2ff87-fac8-4789-b3cd-e8c87b06599a">
+  <img width="1000", height="300" alt="Screenshot 2024-10-16 at 9 31 33 PM" src="https://github.com/user-attachments/assets/b3e2ff87-fac8-4789-b3cd-e8c87b06599a">
 </p>
 
 <br>
@@ -49,41 +49,11 @@ data/
 - Train & Test on a single GPU
   
 ```
-
 CUDA_VISIBLE_DEVICES=0 python3 multi_train.py cifar100 -m seqattn1_cct_7_3x1_32
-
-```
-
-```
-
-CUDA_VISIBLE_DEVICES=0 python3 multi_train.py imagenet -m seqattn1_cct_7_3x1_32
-
-```
-
-```
-
-CUDA_VISIBLE_DEVICES=0 python3 multi_train.py cifar100 -m cct_7_3x1_32
-
-```
-
-```
-
-CUDA_VISIBLE_DEVICES=0 python3 multi_train.py imagenet -m cct_7_3x1_32
-
-```
-
-```
-
-CUDA_VISIBLE_DEVICES=0 python3 multi_train.py cifar100 -m ga1_cct_7_3x1_32
-
-```
-
-```
-
-CUDA_VISIBLE_DEVICES=0 python3 multi_train.py imagenet -m ga1_cct_7_3x1_32
-
 ```
 
 - Train & Test on multiple GPUs
 
-``
+```
+CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nproc-per-node=2 multi_train.py imagenet -m cct_7_3x1_32
+```
