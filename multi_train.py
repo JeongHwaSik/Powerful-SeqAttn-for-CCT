@@ -7,7 +7,7 @@ from traceback import print_exc
 from setup import clear
 from train import run
 
-# CUDA_VISIBLE_DEVICES=5 python3 multi_train.py cifar100 -m resnet50 -c 5
+# CUDA_VISIBLE_DEVICES=5,6 python3 multi_train.py cifar100 -m resnet50 -c 5
 
 setting_dict = dict(
     cifar100="data --dataset-name CIFAR100 --train-size 32 32 --train-resize-mode RandomResizedCrop --random-crop-scale 0.8 1.0 --test-size 32 32 --center-crop-ptr 1.0 --interpolation bicubic --mean 0.5071 0.4867 0.4408 --std 0.2675 0.2565 0.2761 --auto-aug rand-m9-mstd0.5-inc1 --cutmix 1.0 --mixup 0.8 --remode 0.25 --drop-path-rate 0.0 --smoothing 0.1 --batch-size 256 --grad-accum-step 1 --epoch 600 --lr 5e-4 --warmup-lr 1e-6 --min-lr 1e-5 --warmup-epoch 10 --optimizer adamw --weight-decay 6e-2 --fused --scheduler cosine --num-workers 4 --pin-memory --amp --channels-last --save-checkpoint",
