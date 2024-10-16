@@ -7,7 +7,7 @@ from traceback import print_exc
 from setup import clear
 from train import run
 
-# CUDA_VISIBLE_DEVICES=5,6 python3 multi_train.py cifar100 -m resnet50 -c 5
+# CUDA_VISIBLE_DEVICES=0 python3 multi_train.py cifar100 -m resnet50
 # CUDA_VISIBLE_DEVICES=0,1 torchrun --standalone --nproc-per-node=2 multi_train.py cifar100 -m resnet50
 
 # TODO: add '--resume --checkpoint-path {args.output_dir}/{args.model_name}_{args.exp_name}_{version}/checkpoint_last.path' for resume from the checkpoint
