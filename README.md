@@ -9,7 +9,7 @@ As convolution and transformer architectures have advanced, performance on class
 During this development, the limitation of transformers being effective only with large datasets was addressed by the introduction of [CCT](https://arxiv.org/pdf/2104.05704), a hybrid version of convolution and transformer architectures. 
 CCT opened up the possibility for transformers to perform well on small datasets. 
 The sequence pool used in CCT achieved 76.93\% top-1 accuracy on the CIFAR-100 dataset by learning various features, but it was found to lack feature diversity to further enhance performance. 
-This study found out that [gramian attention](https://openaccess.thecvf.com/content/ICCV2023/papers/Ryu_Gramian_Attention_Heads_are_Strong_yet_Efficient_Vision_Learners_ICCV_2023_paper.pdf) is much more effective at learning diverse features compared to the original sequence pooling, achieving 80.52\% on the CIFAR-100 dataset with 8 heads. 
+This study reveals that [gramian attention](https://openaccess.thecvf.com/content/ICCV2023/papers/Ryu_Gramian_Attention_Heads_are_Strong_yet_Efficient_Vision_Learners_ICCV_2023_paper.pdf) is much more effective at learning diverse features compared to the original sequence pooling, achieving 80.52\% on the CIFAR-100 dataset with 8 heads. 
 Taking this a step further, this study proposes a new head architecture called SeqAttention, which is much more lightweight and powerful compared to the gramian attention head.
 
 <br>
