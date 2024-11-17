@@ -1,6 +1,6 @@
 # 🔥Powerful SeqAttention for CCT🔥
 
-For details see [Powerful SeqAttention for Compact Convolutional Transformer]() by Hwasik Jeong and Jongbin Ryu.
+For details see [Powerful SeqAttention for Compact Convolutional Transformer](https://github.com/JeongHwaSik/Powerful-SeqAttn-for-CCT/blob/main/Powerful_SeqAttn_for_CCT.pdf) by Hwasik Jeong and Jongbin Ryu.
 
 <br>
 
